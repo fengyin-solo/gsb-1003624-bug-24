@@ -24,6 +24,17 @@
       </span>
     </p>
 
+    <section v-if="reminders.length" class="panel">
+      <header class="panel-head">
+        <h3>维护提醒</h3>
+      </header>
+      <ul class="reminder-list">
+        <li v-for="reminder in reminders" :key="reminder.id">
+          {{ reminder.createdAt }} · {{ reminder.message }}
+        </li>
+      </ul>
+    </section>
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -76,10 +87,11 @@ import { computed, onMounted, ref } from 'vue'
 import {
   downloadEntries,
   listEntries,
+  listReminders,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import type { EntryRow, MaintenanceReminder } from '@/data/types'
 
 const meta = moduleMeta('firebelt')
 const columns = ["林带编号", "林带名称", "所属林区", "树种组成", "林带长度", "林带宽度", "种植年份", "林带状态"]
@@ -92,6 +104,7 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const reminders = ref<MaintenanceReminder[]>([])
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -128,6 +141,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    reminders.value = listReminders(meta.key)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '防火林带列表读取失败'
   }

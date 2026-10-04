@@ -1,4 +1,4 @@
-import type { EntryRow } from './types'
+import type { EntryRow, MaintenanceState } from './types'
 
 // 示例数据：首次打开时播种，之后浏览器里的改动优先，重置才会回到这份。
 export const SEED_ROWS: Record<string, EntryRow[]> = {
@@ -146,7 +146,7 @@ export const SEED_ROWS: Record<string, EntryRow[]> = {
       "带宽米数": "防火隔离带样例1",
       "建成日期": "2026-09-01",
       "最近维护日期": "2026-09-01",
-      "植被恢复程度": "防火隔离带样例1",
+      "植被恢复程度": "恢复良好",
       "维护状态": "防火隔离带样例1"
     },
     {
@@ -160,7 +160,7 @@ export const SEED_ROWS: Record<string, EntryRow[]> = {
       "带宽米数": "防火隔离带样例2",
       "建成日期": "2026-09-02",
       "最近维护日期": "2026-09-02",
-      "植被恢复程度": "防火隔离带样例2",
+      "植被恢复程度": "待恢复",
       "维护状态": "防火隔离带样例2"
     },
     {
@@ -174,7 +174,7 @@ export const SEED_ROWS: Record<string, EntryRow[]> = {
       "带宽米数": "防火隔离带样例3",
       "建成日期": "2026-09-03",
       "最近维护日期": "2026-09-03",
-      "植被恢复程度": "防火隔离带样例3",
+      "植被恢复程度": "未评估",
       "维护状态": "防火隔离带样例3"
     }
   ],
@@ -793,5 +793,53 @@ export const SEED_ROWS: Record<string, EntryRow[]> = {
       "调查员": "林木生长样例3",
       "记录状态": "林木生长样例3"
     }
+  ],
+}
+
+// 维护域示例数据：一个部分成功的历史批次（条目1已恢复、条目2待恢复），
+// 用来验证历史批次兼容——接着恢复时原维护日期 2026-09-05 保持原样。
+export const SEED_MAINTENANCE: MaintenanceState = {
+  batches: [
+    {
+      id: 1,
+      batchNo: 'MB-20260905-0001',
+      module: 'firebreak',
+      entryIds: [1, 2],
+      restoredEntryIds: [1],
+      maintenanceDate: '2026-09-05',
+      status: '待恢复',
+      idempotencyKey: 'firebreak:1,2',
+      createdAt: '2026-09-05 09:00:00',
+    },
+  ],
+  restorations: [
+    {
+      id: 1,
+      batchId: 1,
+      batchNo: 'MB-20260905-0001',
+      module: 'firebreak',
+      entryId: 1,
+      entryLabel: 'FIRE-0001',
+      vegetation: '恢复良好',
+      restoredAt: '2026-09-06 10:00:00',
+    },
+  ],
+  reminders: [
+    {
+      id: 1,
+      module: 'firebreak',
+      batchId: 1,
+      batchNo: 'MB-20260905-0001',
+      message: '批次 MB-20260905-0001 待恢复：防火隔离带还有 1 条待确认',
+      createdAt: '2026-09-05 09:00:00',
+    },
+    {
+      id: 2,
+      module: 'firebelt',
+      batchId: 1,
+      batchNo: 'MB-20260905-0001',
+      message: '批次 MB-20260905-0001 维护中，请同步巡查防火林带',
+      createdAt: '2026-09-05 09:00:00',
+    },
   ],
 }
