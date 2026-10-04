@@ -1,9 +1,14 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { listPendingRefs } from '@/data/maintenance/store'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
+
+function pendingCountForOverview(key: 'firebreak' | 'firebelt'): number {
+  return listPendingRefs().filter((ref) => ref.module === key).length
+}
 
 export function moduleMeta(key: string): ModuleMeta {
   const meta = MODULE_BY_KEY.get(key)
@@ -88,10 +93,16 @@ export function loadOverview(): OverviewResult {
   const rows = allRows()
   const modules = [...MODULE_BY_KEY.values()].map((meta) => {
     const entries = rows[meta.key] ?? []
+    // 隔离带/林带的待处理口径以在途维护批次为准（与列表、恢复记录同源），
+    // 不能直接读基础行上可能滞后的 pending 标记。
+    const pending =
+      meta.key === 'firebreak' || meta.key === 'firebelt'
+        ? pendingCountForOverview(meta.key as 'firebreak' | 'firebelt')
+        : entries.filter((row) => row.pending).length
     return {
       name: meta.name,
       created: entries.length,
-      pending: entries.filter((row) => row.pending).length,
+      pending,
       abnormal: entries.filter((row) => row.abnormal).length,
     }
   })

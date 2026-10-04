@@ -6,7 +6,7 @@
         <p class="page-desc">维护防火隔离带，围绕隔离带编号、所属林区、起止坐标、带宽米数做登记、筛选与状态流转。</p>
       </div>
       <div class="page-actions">
-        <button class="btn primary" type="button" @click="openCreate">登记防火隔离带</button>
+        <button class="btn primary" type="button" @click="openBatchSchedule">批量安排维护</button>
         <button class="btn" type="button" @click="exportRows">导出防火隔离带清单</button>
       </div>
     </header>
@@ -46,15 +46,16 @@
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
+            <button class="link" type="button" :disabled="row.pending" @click="scheduleOne(row)">安排维护</button>
             <button
-              v-for="action in actions"
-              :key="action"
               class="link"
               type="button"
-              @click="runAction(action, row)"
+              :disabled="!row.pending"
+              @click="recoverOne(row)"
             >
-              {{ action }}
+              确认恢复
             </button>
+            <button class="link" type="button" :disabled="row.status === '已荒废'" @click="abandonOne(row)">标记荒废</button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -64,40 +65,86 @@
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条防火隔离带记录</span>
+      <span>共 {{ total }} 条防火隔离带记录 · 待恢复 {{ pending }} 条（与批量入口、恢复记录同源）</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <ScheduleModal
+      :open="scheduleOpen"
+      :modules="['firebreak']"
+      :preset="preset"
+      @close="scheduleOpen = false"
+      @submit="handleScheduleSubmit"
+    />
+
+    <RecoveryPanel
+      class="panel-gap"
+      module="firebreak"
+      :revision="revision"
+      @recovered="reload"
+      @failed="(message: string) => (errorMessage = message)"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
+import { downloadEntries, moduleMeta } from '@/api/local-service'
 import {
-  downloadEntries,
-  listEntries,
-  moduleMeta,
-  runAction as applyAction,
-} from '@/api/local-service'
+  abandon,
+  findActiveBatch,
+  maintenanceRows,
+  pendingTotal,
+  submitRecovery,
+  submitSchedule,
+} from '@/api/maintenance-service'
+import ScheduleModal from '@/components/ScheduleModal.vue'
+import RecoveryPanel from '@/components/RecoveryPanel.vue'
 import type { EntryRow } from '@/data/types'
+import type { MaintenanceModuleKey, ScheduleSelection } from '@/data/maintenance/types'
 
-const meta = moduleMeta('firebreak')
+const MODULE: MaintenanceModuleKey = 'firebreak'
+const meta = moduleMeta(MODULE)
 const columns = ["隔离带编号", "所属林区", "起止坐标", "带宽米数", "建成日期", "最近维护日期", "植被恢复程度", "维护状态"]
-const actions = ["安排维护", "确认恢复", "标记荒废"]
 const statuses = ["正常", "需割草", "需补植", "已荒废"]
-const stats = [{"label": "隔离带总长", "value": 0}, {"label": "需维护条数", "value": 0}, {"label": "荒废条数", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
+const pending = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const revision = ref(0)
+const scheduleOpen = ref(false)
+const preset = ref<{ module: MaintenanceModuleKey; itemId: number } | null>(null)
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+const stats = computed(() => [
+  { label: '隔离带总数', value: total.value },
+  {
+    label: '需维护条数',
+    value: rows.value.filter((row) => row.status === '需割草' || row.status === '需补植').length,
+  },
+  { label: '待恢复条数', value: pending.value },
+  { label: '荒废条数', value: rows.value.filter((row) => row.status === '已荒废').length },
+])
+
+function applyFilters(items: EntryRow[]): EntryRow[] {
+  const pairs = Object.entries(filters.value).filter(([, value]) => value.trim() !== '')
+  if (pairs.length === 0) {
+    return items
+  }
+  return items.filter((row) =>
+    pairs.every(([field, value]) => String(row[field] ?? '').includes(value.trim())),
+  )
+}
 
 function resetFilters() {
   filters.value = {}
@@ -108,29 +155,72 @@ function exportRows() {
   downloadEntries(meta.key)
 }
 
-function openCreate() {
-  errorMessage.value = '防火隔离带登记入口尚未接入审批流'
+function reload() {
+  errorMessage.value = ''
+  revision.value += 1
+  const items = applyFilters(maintenanceRows(MODULE))
+  rows.value = items
+  total.value = maintenanceRows(MODULE).length
+  pending.value = pendingTotal(MODULE)
 }
 
-function runAction(action: string, row: EntryRow) {
-  errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
+function openBatchSchedule() {
+  preset.value = null
+  scheduleOpen.value = true
+}
+
+function scheduleOne(row: EntryRow) {
+  preset.value = { module: MODULE, itemId: Number(row.id) }
+  scheduleOpen.value = true
+}
+
+function handleScheduleSubmit(payload: {
+  selections: ScheduleSelection[]
+  maintenanceDate: string
+}) {
+  const result = submitSchedule(payload.selections, payload.maintenanceDate)
+  scheduleOpen.value = false
   if (!result.ok) {
     errorMessage.value = result.message
     return
   }
+  errorMessage.value = result.message
   reload()
 }
 
-function reload() {
-  errorMessage.value = ''
-  try {
-    const payload = listEntries(meta.key, filters.value)
-    rows.value = payload.items
-    total.value = payload.total
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '防火隔离带列表读取失败'
+function recoverOne(row: EntryRow) {
+  // 行内「确认恢复」直接定位该对象所在的在途批次；与恢复记录面板是同一入口。
+  const found = findActiveBatch(MODULE, Number(row.id))
+  if (!found) {
+    errorMessage.value = '该隔离带没有待恢复的维护批次'
+    return
   }
+  const recoveryInput = window.prompt(`批次 ${found.batchId}：请输入植被恢复程度（0-100）`, '90')
+  if (recoveryInput === null) {
+    return
+  }
+  const recovery = Number(recoveryInput)
+  if (!Number.isInteger(recovery) || recovery < 0 || recovery > 100) {
+    errorMessage.value = '植被恢复程度需为 0-100 的整数'
+    return
+  }
+  const result = submitRecovery(found.batchId, recovery)
+  if (!result.ok) {
+    errorMessage.value = result.message
+    return
+  }
+  errorMessage.value = result.message
+  reload()
+}
+
+function abandonOne(row: EntryRow) {
+  const result = abandon(MODULE, Number(row.id))
+  if (!result.ok) {
+    errorMessage.value = result.message
+    return
+  }
+  errorMessage.value = result.message
+  reload()
 }
 
 onMounted(reload)
